@@ -1,8 +1,6 @@
-package com.example
+package com.example.snippets
 
 import arrow.core.Either
-import arrow.core.continuations.either
-import arrow.core.right
 
 
 suspend fun main() {
