@@ -4,7 +4,10 @@ import arrow.core.Either
 import arrow.core.continuations.either
 import arrow.core.right
 import arrow.fx.coroutines.CircuitBreaker
+import arrow.fx.coroutines.Resource
+import arrow.fx.coroutines.continuations.resource
 import com.example.external.*
+import com.example.external.env.Env
 import com.example.external.impl.BillingImpl
 import com.example.external.impl.WarehouseImpl
 import com.example.plugins.*
@@ -23,24 +26,13 @@ import io.ktor.server.routing.*
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.ExperimentalTime
 
-@OptIn(ExperimentalTime::class)
 suspend fun main() {
-    val circuitBreaker = CircuitBreaker.of(
-        maxFailures = 2,
-        resetTimeout = 2.seconds,
-        exponentialBackoffFactor = 2.0,           // enable exponentialBackoffFactor
-        maxResetTimeout = 60.seconds,             // limit exponential back-off time
-    )
-    val retries = 5
-    // inject implementation as parameters
-    val app = ExampleApp(
-        WarehouseImpl(Url("my.internal.warehouse.service")),
-        BillingImpl(Url("my.external.billing.service")).withBreaker(circuitBreaker, retries)
-    )
-
-    embeddedServer(Netty, port = 8080, host = "0.0.0.0") {
-        app.configure(this)
-    }.start(wait = true)
+    val env = Env()
+    dependencies(env).use { module: ExampleApp ->
+        embeddedServer(Netty, host = env.http.host, port = env.http.port) {
+            module.configure(this)
+        }.start(wait = true)
+    }
 }
 
 // dependencies are declared as interfaces
@@ -67,7 +59,6 @@ class ExampleApp(
                     listOf(1, 2, 3).map {
                         it.right().bind()
                     }
-
 
                     validateStructure(order).mapLeft { problems ->
                         badRequest(problems.joinToString { it.name })
@@ -98,6 +89,21 @@ class ExampleApp(
             }
         }
     }
+}
+
+@OptIn(ExperimentalTime::class)
+fun dependencies(env: Env): Resource<ExampleApp> = resource {
+    val circuitBreaker = CircuitBreaker.of(
+        maxFailures = 2,
+        resetTimeout = 2.seconds,
+        exponentialBackoffFactor = 2.0,           // enable exponentialBackoffFactor
+        maxResetTimeout = 60.seconds,             // limit exponential back-off time
+    )
+    val retries = 5
+    ExampleApp(
+        WarehouseImpl(Url("my.internal.warehouse.service")),
+        BillingImpl(Url("my.external.billing.service")).withBreaker(circuitBreaker, retries)
+    )
 }
 
 typealias BadRequest = TextContent
